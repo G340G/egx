@@ -56,6 +56,7 @@ let dialogueOpen = false;
 let journalOpen = false;
 let gameStarted = false;
 let gameEnded = false;
+let doorTransitioning = false;
 let listeningPending = false;
 let flashlightOn = true;
 let audio = null;
@@ -496,57 +497,123 @@ function updateCultSequence(dt,t) {
 function scheduleCultSceneFates(count,source,mode='collapse') {
   for(let i=0;i<count;i++) queueCultFate(source,null,(i%2===0)?mode:'vanish');
 }
-function addDoor(group, x, z, label, destination, spawn, locked = false) {
-  const root = new THREE.Group(); root.position.set(x, 0, z); group.add(root);
-  addBox(root, -.62, 1.15, 0, .16, 2.3, .16, M.darkWood);
-  addBox(root, .62, 1.15, 0, .16, 2.3, .16, M.darkWood);
-  addBox(root, 0, 2.22, 0, 1.4, .16, .18, M.darkWood);
-  const slab = addBox(root, 0, 1.05, .06, 1.12, 2.05, .12, locked ? M.rust : M.wood);
-  addBox(root, .39, 1.0, -.02, .045, .045, .035, M.gold);
-  const entry = { id: `door_${destination}`, type: 'door', object: root, point: root.position, radius: 3.3, prompt: locked ? '[ E ] LA BOTOLA È BLOCCATA' : `[ E ] ENTRA — ${label.toUpperCase()}`, label, destination, spawn, locked, slab };
-  group.userData.interactables.push(entry); return entry;
+function addDoor(group,x,z,label,destination,spawn,locked=false,options={}){
+  const root=new THREE.Group();root.position.set(x,0,z);root.rotation.y=options.rotationY??0;group.add(root);
+  const roman=options.style==='roman',frame=roman?M.wall:M.darkWood,leafMat=locked?M.rust:M.wood;
+  addBox(root,0,1.28,-.12,1.48,2.5,.11,M.black,{castShadow:false});
+  addBox(root,-.72,1.28,.02,.20,2.56,.40,frame);addBox(root,.72,1.28,.02,.20,2.56,.40,frame);
+  addBox(root,0,2.53,.02,1.72,.22,.42,frame);addBox(root,0,.12,.17,1.78,.22,.72,M.wall);
+  const pivot=new THREE.Group();pivot.position.set(-.57,0,.12);root.add(pivot);
+  const leaf=new THREE.Group();leaf.position.x=.57;pivot.add(leaf);
+  const slab=addBox(leaf,0,1.15,.12,1.10,2.16,.095,leafMat);
+  for(let i=0;i<6;i++)addBox(leaf,-.46+i*.184,1.15,.177,.168,2.10,.018,i%3===0?M.darkWood:leafMat,{castShadow:false});
+  for(const yy of [.43,1.83]){
+    addBox(leaf,0,yy,.205,1.06,.11,.045,M.darkWood);
+    for(const side of [-1,1]){const rivet=new THREE.Mesh(new THREE.SphereGeometry(.032,8,6),M.rust);rivet.position.set(side*.46,yy,.235);leaf.add(rivet);}
+  }
+  addBox(leaf,-.02,1.14,.208,.075,1.35,.05,M.darkWood,{rotation:[0,0,-.20]});
+  for(const yy of [.52,1.86])addBox(root,-.68,yy,.245,.22,.09,.07,M.rust);
+  const stem=new THREE.Mesh(new THREE.CylinderGeometry(.024,.024,.14,8),M.rust);stem.rotation.x=Math.PI/2;stem.position.set(.42,1.08,.25);leaf.add(stem);
+  const knob=new THREE.Mesh(new THREE.SphereGeometry(.052,10,8),M.gold);knob.position.set(.42,1.08,.31);leaf.add(knob);
+  if(roman){
+    const stone=mat(0x89877d,.98,{map:TEX.concrete,bumpScale:.14});
+    for(const s of [-1,1]){
+      const col=new THREE.Mesh(new THREE.CylinderGeometry(.115,.17,2.75,12),stone);col.position.set(s*.99,1.42,.18);root.add(col);
+      addBox(root,s*.99,.12,.18,.42,.22,.48,stone);addBox(root,s*.99,2.8,.18,.46,.24,.50,stone);
+      addBox(root,s*.99,2.96,.18,.60,.11,.58,stone);
+      const collar=new THREE.Mesh(new THREE.TorusGeometry(.14,.026,6,18),stone);collar.position.set(s*.99,2.65,.18);root.add(collar);
+    }
+    for(const r of [.82,1.02,1.21]){const arch=new THREE.Mesh(new THREE.TorusGeometry(r,.065,8,36,Math.PI),stone);arch.position.set(0,2.52,.22);root.add(arch);}
+    const tymp=new THREE.Mesh(new THREE.CircleGeometry(.73,32,0,Math.PI),stone);tymp.position.set(0,2.52,.15);root.add(tymp);
+    for(const s of [-1,1]){const curl=new THREE.Mesh(new THREE.TorusGeometry(.19,.035,6,18,Math.PI*1.45),M.rust);curl.position.set(s*.38,2.64,.20);curl.rotation.z=s*.42;root.add(curl);}
+    const rose=new THREE.Mesh(new THREE.TorusGeometry(.12,.035,7,18),M.rust);rose.position.set(0,2.78,.23);root.add(rose);
+  }else{
+    addBox(root,-.88,1.26,.10,.08,2.52,.28,M.wood);addBox(root,.88,1.26,.10,.08,2.52,.28,M.wood);
+    addBox(root,0,2.68,.12,2.05,.18,.66,M.darkWood,{rotation:[-.035,0,0]});
+  }
+  const entry={id:`door_${destination}`,type:'door',object:root,point:root.position,radius:options.radius??3.3,
+    prompt:locked?'[ E ] LA SOGLIA È BLOCCATA':`[ E ] ENTRA — ${label.toUpperCase()}`,
+    label,destination,spawn,locked,slab,doorPivot:pivot,openAngle:options.openAngle??-1.08};
+  group.userData.interactables.push(entry);return entry;
 }
-function addHouseExterior(group, x, z, w, d, h, seed = 1, color = 0x85877f, frontDoor = false) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); group.add(g);
-  const wallMat = mat(color, 1, { map: TEX.plaster });
-  addBox(g, 0, h / 2, -d / 2, w, h, .42, wallMat);
-  addBox(g, -w / 2, h / 2, 0, .42, h, d, wallMat);
-  addBox(g, w / 2, h / 2, 0, .42, h, d, wallMat);
-  if (frontDoor) {
-    // Split the front facade around a proper, walk-through doorway.
-    const openingW = 2.2, openingH = 2.55;
-    const sideW = (w - openingW) / 2;
-    addBox(g, -(openingW + sideW) / 2, h / 2, d / 2, sideW, h, .42, wallMat);
-    addBox(g, (openingW + sideW) / 2, h / 2, d / 2, sideW, h, .42, wallMat);
-    addBox(g, 0, openingH + (h - openingH) / 2, d / 2, openingW, h - openingH, .42, wallMat);
-  } else {
-    addBox(g, 0, h / 2, d / 2, w, h, .42, wallMat);
+
+function addHouseExterior(group,x,z,w,d,h,seed=1,color=0x85877f,frontDoor=true){
+  const g=new THREE.Group();g.position.set(x,0,z);group.add(g);
+  const wall=mat(color,1,{map:TEX.plaster,bumpScale:.11}),wood=mat(seed%2?0x514538:0x625342,1,{map:TEX.wood,bumpScale:.13}),roof=mat(seed===5?0x202321:0x292b28,1,{map:TEX.concrete,bumpScale:.1});
+  const fz=d/2,dw=frontDoor?1.92:0;
+  addBox(g,0,.23,-d/2,w+.3,.46,.60,M.darkWall);addBox(g,-w/2,.23,0,.60,.46,d+.25,M.darkWall);addBox(g,w/2,.23,0,.60,.46,d+.25,M.darkWall);addBox(g,0,.23,d/2,w+.3,.46,.60,M.darkWall);
+  addBox(g,0,h/2,-d/2,w,h,.42,wall);addBox(g,-w/2,h/2,0,.42,h,d,wall);addBox(g,w/2,h/2,0,.42,h,d,wall);
+  if(frontDoor){
+    addWindowedWall(g,'x',fz,-w/2,-dw/2,h,.42,wall,[{at:-w*.30,w:Math.min(1.45,w*.24),h:1.18,y:1.52}]);
+    addWindowedWall(g,'x',fz,dw/2,w/2,h,.42,wall,[{at:w*.30,w:Math.min(1.45,w*.24),h:1.18,y:1.52}]);
+    addBox(g,0,2.52+(h-2.52)/2,fz,dw,h-2.52,.42,wall);
+  }else addBox(g,0,h/2,fz,w,h,.42,wall);
+  for(let row=0;row<Math.floor(h/.34);row++){
+    const y=.5+row*.34;
+    if(y<1.34||y>2.82)addBox(g,0,y,fz+.225,w-.12,.038,.05,wood,{castShadow:false});
+    else if(frontDoor){addBox(g,-w*.30,y,fz+.225,w*.38,.038,.05,wood,{castShadow:false});addBox(g,w*.30,y,fz+.225,w*.38,.038,.05,wood,{castShadow:false});}
   }
-  // A crude pitched roof assembled from two dark planes.
-  const roofMat = mat(0x292a27, 1, { map: TEX.concrete });
-  const r1 = addBox(g, -w * .24, h + .48, 0, w * .58, .22, d + .8, roofMat, { rotation: [0, 0, -.28] });
-  const r2 = addBox(g, w * .24, h + .48, 0, w * .58, .22, d + .8, roofMat, { rotation: [0, 0, .28] });
-  // Empty black windows with a dirty glass layer.
-  for (const side of [-1, 1]) {
-    const win = addBox(g, side * (w / 2 + .22), h * .55, -d * .12, .035, .72, .92, M.glass, { castShadow: false });
-    addBox(g, side * (w / 2 + .25), h * .55, -d * .12, .08, .82, 1.02, M.darkWood, { castShadow: false });
+  for(const s of [-1,1])for(let row=0;row<Math.floor(h/.4);row++)addBox(g,s*(w/2+.225),.54+row*.4,0,.05,.045,d-.26,wood,{castShadow:false});
+  for(const wx of [-w*.30,w*.30]){
+    const wy=2.1,ww=Math.min(1.45,w*.24),wh=1.18;
+    addBox(g,wx,wy,fz+.22,.035,wh-.12,ww-.12,M.glass,{castShadow:false});
+    addBox(g,wx-ww/2-.065,wy,fz+.30,.12,wh+.22,.12,wood);addBox(g,wx+ww/2+.065,wy,fz+.30,.12,wh+.22,.12,wood);
+    addBox(g,wx,wy-wh/2-.065,fz+.30,ww+.25,.12,.12,wood);addBox(g,wx,wy+wh/2+.065,fz+.30,ww+.25,.12,.12,wood);
+    addBox(g,wx,wy,fz+.36,.045,wh-.04,.045,M.darkWood);addBox(g,wx,wy,fz+.36,.045,.045,ww-.05,M.darkWood);
+    if(seed%2===0)addBox(g,wx-ww*.52,wy,fz+.4,.10,wh+.03,.07,M.darkWood,{rotation:[0,0,.08],castShadow:false});
   }
-  // Three broken courses of damp brick peek through the failed limewash.
-  for(let row=0;row<2;row++) for(let col=0;col<Math.floor(w/1.15);col++) {
-    const bx=-w/2+.6+col*1.12+(row%2)*.48;
-    addBox(g,bx,.20+row*.24,d/2+.24,1.02,.20,.055,M.brick,{castShadow:false});
+  const shape=new THREE.Shape();shape.moveTo(-w/2,0);shape.lineTo(0,1.42);shape.lineTo(w/2,0);shape.closePath();
+  const gable=new THREE.Mesh(new THREE.ShapeGeometry(shape),wall);gable.position.set(0,h,fz+.22);g.add(gable);
+  addBox(g,-w*.245,h+.62,0,w*.60,.24,d+.9,roof,{rotation:[0,0,.42]});addBox(g,w*.245,h+.62,0,w*.60,.24,d+.9,roof,{rotation:[0,0,-.42]});
+  const ridge=new THREE.Mesh(new THREE.CylinderGeometry(.085,.085,d+.95,8),M.darkWood);ridge.rotation.x=Math.PI/2;ridge.position.set(0,h+1.37,0);g.add(ridge);
+  for(const s of [-1,1])for(let i=0;i<7;i++){const batten=addBox(g,s*(.58+i*.60),h+.76,0,.045,.045,d+.62,M.darkWood,{castShadow:false});batten.rotation.z=s===-1?.42:-.42;if(seed===4&&i===5)batten.position.y-=.18;}
+  if(seed===2){
+    const dz=fz+.58;addBox(g,-.55,h+.88,dz,1.65,1.38,.28,wall);
+    const ds=new THREE.Shape();ds.moveTo(-.84,0);ds.lineTo(0,.86);ds.lineTo(.84,0);ds.closePath();
+    const df=new THREE.Mesh(new THREE.ShapeGeometry(ds),wall);df.position.set(-.55,h+1.55,dz+.16);g.add(df);
+    addBox(g,-.55,h+1.25,dz+.26,.76,.90,.05,M.black,{castShadow:false});addBox(g,-.55,h+1.25,dz+.32,.88,1.03,.08,wood);
+    addBox(g,-.55,h+1.25,dz+.37,.04,.90,.04,M.darkWood);addBox(g,-.55,h+1.25,dz+.37,.74,.04,.04,M.darkWood);
+    for(const s of [-1,1]){const post=new THREE.Mesh(new THREE.CylinderGeometry(.07,.095,2.55,8),wood);post.position.set(s*1.22,1.28,fz+.73);g.add(post);}
+    addBox(g,0,2.60,fz+.74,2.88,.18,.24,M.darkWood);addBox(g,0,2.75,fz+.84,3.3,.14,1.22,roof,{rotation:[-.05,0,0]});
+    addBox(g,0,.20,fz+.68,2.78,.34,1.2,M.wall);addBox(g,0,.47,fz+.96,2.45,.18,.66,M.darkWall);
+  }else if(seed===4){
+    addBox(g,-w*.20,1.42,fz+.30,.10,2.65,.12,M.rust,{rotation:[0,0,-.1]});addBox(g,w*.23,2.18,fz+.30,.09,1.42,.12,wood,{rotation:[0,0,.08]});
+    addBox(g,-w/2-.28,2.05,-d*.08,.54,3.35,d*.46,wall,{rotation:[0,0,.075]});addBox(g,-w/2-.58,.13,-d*.08,1.02,.26,d*.48,M.darkWall,{rotation:[0,0,.075]});
+  }else if(seed===3){
+    addBox(g,w/2+.30,1.65,-d*.18,.72,3,d*.58,wall);addBox(g,w/2+.30,3.15,-d*.18,.95,.18,d*.60,roof);
+  }else if(seed===5){
+    for(let i=0;i<5;i++)addBox(g,-1.12+i*.56,1.95,fz+.30,.075,2.2,.09,M.darkWood,{rotation:[0,0,(i%2?1:-1)*.02]});
+    addBox(g,0,3.05,fz+.36,3.1,.12,.12,M.rust);for(const s of [-1,1])addBox(g,s*1.2,1.42,fz+.35,.09,2.25,.10,M.rust);
   }
-  for(let row=0;row<2;row++) for(let col=0;col<Math.floor(d/1.2);col++) {
-    const bz=-d/2+.6+col*1.16;
-    addBox(g,-w/2-.24,.20+row*.24,bz,.055,.20,1.02,M.brick,{castShadow:false});
-  }
-  // Boards across the front windows, some split and hanging loose.
-  for (let i = 0; i < 3; i++) addBox(g, -w * .2 + i * .2, h * .56, d / 2 + .24, .9, .075, .08, M.darkWood, { rotation: [0, 0, -.06 + i * .05] });
-  addBox(g, w*.08, h*.32, d/2+.26, .04, .72, .045, M.rust, {rotation:[0,0,.16],castShadow:false});
-  const chimney = addBox(g, w * .25, h + 1.1, -d * .2, .6, 1.7, .6, M.rust);
-  chimney.rotation.y = .16;
+  const chimney=addBox(g,seed===4?-w*.31:w*.29,h+1.36,-d*.22,.66,2.3,.68,M.brick);chimney.rotation.y=.09;
+  for(let i=0;i<4;i++){const slate=addBox(g,(i-1.5)*.58,h+.30,-d*.05+i*.16,.48,.05,.18,M.darkWall,{rotation:[0,0,(i%2?1:-1)*.08]});if(seed===4&&i===2)slate.position.y-=.18;}
+  if(seed!==5){addBox(g,w/2+.23,h+.12,.15,.08,.08,d*.78,M.rust);addBox(g,w/2+.31,.45,d*.35,.055,.8,.055,M.rust,{rotation:[0,0,-.08]});}
   return g;
 }
+function addRomanesqueChurchExterior(group,x,z,w=12,d=15,h=6.8){
+  const g=new THREE.Group();g.position.set(x,0,z);group.add(g);
+  const stone=mat(0x85847b,.99,{map:TEX.concrete,bumpScale:.18}),pale=mat(0x99968a,.98,{map:TEX.concrete,bumpScale:.12}),roof=mat(0x292b28,1,{map:TEX.concrete}),front=d/2;
+  addBox(g,0,h/2,-d/2,w,h,.6,stone);addBox(g,-w/2,h/2,0,.6,h,d,stone);addBox(g,w/2,h/2,0,.6,h,d,stone);
+  addWindowedWall(g,'x',front,-w/2,-1.15,h,.6,stone,[{at:-3.7,w:.56,h:1.34,y:3.45}]);
+  addWindowedWall(g,'x',front,1.15,w/2,h,.6,stone,[{at:3.7,w:.56,h:1.34,y:3.45}]);addBox(g,0,2.95+(h-2.95)/2,front,2.30,h-2.95,.6,stone);
+  addBox(g,-2.65,h+.48,-.1,6.7,.30,d+.5,roof,{rotation:[0,0,.41]});addBox(g,2.65,h+.48,-.1,6.7,.30,d+.5,roof,{rotation:[0,0,-.41]});
+  addBox(g,-4.65,4.15,-.1,2.25,.20,d+.35,roof,{rotation:[0,0,.08]});addBox(g,4.65,4.15,-.1,2.25,.20,d+.35,roof,{rotation:[0,0,-.08]});
+  const ridge=new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,d+.6,8),M.darkWall);ridge.rotation.x=Math.PI/2;ridge.position.set(0,h+1.12,-.1);g.add(ridge);
+  const gs=new THREE.Shape();gs.moveTo(-w/2,0);gs.lineTo(0,1.6);gs.lineTo(w/2,0);gs.closePath();const gf=new THREE.Mesh(new THREE.ShapeGeometry(gs),stone);gf.position.set(0,h,front+.3);g.add(gf);
+  for(let i=-1;i<=1;i++){
+    const apse=new THREE.Mesh(new THREE.CylinderGeometry(1.95,2.18,5.4,20,1,true,0,Math.PI),stone);apse.position.set(i*3.05,2.72,-d/2-.72);g.add(apse);
+    const dome=new THREE.Mesh(new THREE.SphereGeometry(2.02,20,10,0,Math.PI*2,0,Math.PI/2),pale);dome.position.set(i*3.05,5.4,-d/2-.72);dome.scale.y=.58;g.add(dome);
+    addBox(g,i*3.05,3.1,-d/2-2.82,.12,1.2,.1,M.black,{castShadow:false});
+    for(let j=-1;j<=1;j++){const a=(j+1)*Math.PI/3,px=i*3.05+Math.sin(a)*1.92,pz=-d/2-.72-Math.cos(a)*1.92;addBox(g,px,3.1,pz,.11,2,.13,pale);if(j<1){const arc=new THREE.Mesh(new THREE.TorusGeometry(.34,.045,6,16,Math.PI),pale);arc.position.set(px,5.62,pz);arc.rotation.y=a;g.add(arc);}}
+  }
+  for(const side of [-1,1])for(let i=0;i<10;i++){const xx=side*(w/2-.28),zz=-d/2+1+i*1.42;const arc=new THREE.Mesh(new THREE.TorusGeometry(.34,.055,7,18,Math.PI),pale);arc.position.set(xx,6.25,zz);arc.rotation.y=side*Math.PI/2;g.add(arc);addBox(g,xx,5.88,zz,.12,.62,.12,pale);addBox(g,xx,6.62,zz,.18,.10,.18,pale);}
+  addBox(g,-4.25,4.55,5,2.55,9.1,2.65,stone);addBox(g,-4.25,9.3,5,2.9,.4,3,pale);
+  for(const s of [-1,1]){addBox(g,-4.25+s*.88,10.18,3.66,.78,1.42,.18,M.black,{castShadow:false});addBox(g,-4.25+s*.88,10.18,6.34,.78,1.42,.18,M.black,{castShadow:false});}
+  const cap=new THREE.Mesh(new THREE.ConeGeometry(2,1.7,4),roof);cap.rotation.y=Math.PI/4;cap.position.set(-4.25,11.35,5);g.add(cap);
+  addBox(g,-4.25,12.35,5,.07,.72,.07,M.rust);addBox(g,-4.25,12.46,5,.46,.065,.07,M.rust);
+  for(let row=0;row<9;row++)for(let col=0;col<8;col++)addBox(g,-w/2+.78+col*1.48+(row%2)*.38,.45+row*.66,front+.315,1.3,.045,.045,row%3===0?pale:stone,{castShadow:false});
+}
+
 const TREE_MATERIALS = [mat(0x28352b, 1), mat(0x34402f, 1), mat(0x444434, 1)];
 function branchBetween(parent, a, b, radius, material) {
   const A=new THREE.Vector3(...a), B=new THREE.Vector3(...b), d=new THREE.Vector3().subVectors(B,A);
@@ -611,12 +678,28 @@ function addManifesto(group, position, rotation, headline, subline='ARCHIVIO 14-
   const nailMat=M.rust;for(const [nx,ny] of [[-1.13,-.72],[1.13,-.72],[-1.13,.72],[1.13,.72]]){const nail=new THREE.Mesh(new THREE.SphereGeometry(.035,8,6),nailMat);nail.position.copy(poster.position);nail.position.add(new THREE.Vector3(nx,ny,0));group.add(nail);}
   return poster;
 }
-function addBench(group, x, z, rot = 0) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot; group.add(g);
-  addBox(g, 0, .48, 0, 1.6, .13, .42, M.wood);
-  addBox(g, -.58, .22, 0, .12, .48, .14, M.darkWood); addBox(g, .58, .22, 0, .12, .48, .14, M.darkWood);
-  addBox(g, 0, .78, -.15, 1.6, .48, .12, M.wood);
-  return g;
+function addWoodTable(group,x,z,w=2.6,d=1.25,h=.82,seed=1){
+  const root=new THREE.Group();root.position.set(x,0,z);group.add(root);
+  const n=Math.max(3,Math.round(d/.34)),bd=d/n;
+  for(let i=0;i<n;i++)addBox(root,0,h+(i%2)*.008,-d/2+bd*(i+.5),w-(i%3)*.035,.075,bd-.018,i%3===0?M.darkWood:M.wood);
+  for(const s of [-1,1]){addBox(root,s*(w/2-.16),h-.16,0,.14,.24,d-.16,M.darkWood);addBox(root,0,h-.16,s*(d/2-.14),w-.18,.24,.13,M.darkWood);}
+  for(const sx of [-1,1])for(const sz of [-1,1]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.075,.11,h-.03,7),M.darkWood);leg.position.set(sx*(w/2-.19),h/2-.01,sz*(d/2-.16));leg.rotation.z=sx*.025;leg.rotation.x=sz*.018;leg.castShadow=true;root.add(leg);}
+  addBox(root,0,.25,0,w*.70,.10,.10,M.darkWood);addBox(root,0,.25,0,.10,.10,d*.70,M.darkWood);
+  const split=addBox(root,w*.12,h+.043,d*.28,.52,.018,.024,M.rust,{castShadow:false});split.rotation.y=.13;
+  const knot=new THREE.Mesh(new THREE.TorusGeometry(.075,.012,5,12),M.darkWood);knot.rotation.x=-Math.PI/2;knot.position.set(-w*.22,h+.044,-d*.18);root.add(knot);
+  for(const sx of [-1,1]){const nail=new THREE.Mesh(new THREE.SphereGeometry(.018,6,5),M.rust);nail.position.set(sx*(w/2-.18),h+.043,0);root.add(nail);}
+  root.userData.seed=seed;return root;
+}
+function addWoodChair(group,x,z,rot=0,scale=1){
+  const root=new THREE.Group();root.position.set(x,0,z);root.rotation.y=rot;root.scale.setScalar(scale);group.add(root);addBox(root,0,.49,0,.62,.095,.58,M.wood);
+  for(const sx of [-1,1])for(const sz of [-1,1]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.045,.075,.49,7),M.darkWood);leg.position.set(sx*.245,.245,sz*.22);leg.rotation.z=sx*.018;root.add(leg);}
+  for(const sx of [-1,1]){const back=new THREE.Mesh(new THREE.CylinderGeometry(.045,.06,.97,7),M.darkWood);back.position.set(sx*.245,.97,-.235);root.add(back);}
+  addBox(root,0,.91,-.235,.60,.12,.09,M.darkWood);addBox(root,0,.71,-.235,.48,.08,.075,M.wood);addBox(root,0,1.12,-.235,.60,.09,.09,M.wood);addBox(root,0,.22,0,.42,.07,.08,M.darkWood);return root;
+}
+function addBench(group,x,z,rot=0){
+  const g=new THREE.Group();g.position.set(x,0,z);g.rotation.y=rot;group.add(g);addBox(g,0,.49,0,1.78,.14,.48,M.wood);
+  for(const s of [-1,1]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.055,.09,.48,7),M.darkWood);leg.position.set(s*.62,.24,0);g.add(leg);const back=new THREE.Mesh(new THREE.CylinderGeometry(.055,.07,.95,7),M.darkWood);back.position.set(s*.72,.93,-.19);g.add(back);}
+  addBox(g,0,.92,-.19,1.65,.13,.12,M.darkWood);addBox(g,0,.72,-.19,1.50,.085,.09,M.wood);addBox(g,0,.22,0,1.25,.08,.10,M.darkWood);return g;
 }
 
 // -----------------------------------------------------------------------------
@@ -801,14 +884,17 @@ function buildRoad() {
     const x = -16 + i * 1.3; addBox(z.group, x, .52, -41, .11, 1.0, .11, M.darkWood);
     if (i % 4 === 0) addBox(z.group, x, .76, -41, .11, .1, 1.0, M.darkWood, { rotation: [0, Math.PI / 2, 0] });
   }
-  // Main farmhouse, chapel and abandoned dwelling.
-  addHouseExterior(z.group, 0, -15, 15, 13, 5.4, 2, 0x87867b);
-  addHouseExterior(z.group, 37, -25, 12, 15, 7.2, 3, 0x656860);
-  addHouseExterior(z.group, -36, -14, 12, 10, 4.8, 4, 0x77766c);
-  addHouseExterior(z.group, 27, 22, 10, 9, 4.2, 5, 0x555a55, true);
+  // Weathered timber houses retain different silhouettes; the church is a separate Romanesque stone mass.
+  addHouseExterior(z.group,0,-15,15,13,5.4,2,0x87867b,true);
+  addRomanesqueChurchExterior(z.group,37,-25,12,15,6.8);
+  addHouseExterior(z.group,-36,-14,12,10,4.8,4,0x77766c,true);
+  addHouseExterior(z.group,27,22,10,9,4.2,5,0x555a55,true);
   addRoadSurfaceDetails(z.group); addWoodPavement(z.group,27,10.2,18.2,3.3); addMachineComplex(z.group);
   // The farmhouse's false golden window.
-  addLight(z.group, 0xffb35d, 2.1, 18, 0, 2.0, -7, { decay: 1.5 });
+  addLight(z.group,0xffb35d,2.1,18,0,2.0,-7,{decay:1.5});
+  const firstPrimo=makeNPC(z.group,-2.15,-5.45,'Il Primo',0x4b463d,1);
+  firstPrimo.isOpeningPrimo=true;firstPrimo.radius=4.0;firstPrimo.prompt='[ E ] PARLA — IL PRIMO';
+  firstPrimo.dialogue={line:'You made it. I am glad. The road is unpleasant once the fog comes down. Come under the porch a moment; you must be cold.',choices:['Thank you. Have you been waiting long?','Do you know why I was called here?','Who are the people inside?'],replies:['Not long. I kept the lamp on because a person should not have to arrive at a dark door. That is all.','Only what the letter told me. You tune pianos, and you notice when a note is almost right. We have a room that needs that kind of attention.','Neighbours, mostly. They have been keeping one another company. It is easier to be here when somebody remembers to leave a place for you.']};
   const windowGlow = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.1), new THREE.MeshBasicMaterial({ color: 0xc08a4a, transparent: true, opacity: .48 })); windowGlow.position.set(3.8, 3.0, -8.35); z.group.add(windowGlow);
   // Small derelict industrial shed to the east.
   addBox(z.group, 24, 2.2, 5, 16, 4.4, 12, M.darkWall);
@@ -817,10 +903,10 @@ function buildRoad() {
   // Distant industrial chimneys.
   for (let i = 0; i < 3; i++) { const chimney = new THREE.Mesh(new THREE.CylinderGeometry(.65, .8, 22 + i * 5, 8), M.rust); chimney.position.set(48 + i * 4, 12 + i * 2.5, 41); z.group.add(chimney); }
   // Doors into interiors.
-  addDoor(z.group, 0, -7.0, 'la casa', 'home', [0, 0, 6.2]);
-  addDoor(z.group, 37, -17.1, 'la chiesa', 'church', [0, 0, 9.4]);
-  addDoor(z.group, -36, -8.6, 'la casa vuota', 'ruin', [0, 0, 5.8]);
-  const abattoirDoor = addDoor(z.group, 27, 26.5, 'la casa delle bestie', 'abattoir', [0,0,7.0], true);
+  addDoor(z.group,0,-8.27,'la casa','home',[0,0,6.2]);
+  addDoor(z.group,37,-17.28,'la chiesa','church',[0,0,9.4],false,{style:'roman'});
+  addDoor(z.group,-36,-8.78,'la casa vuota','ruin',[0,0,5.8]);
+  const abattoirDoor=addDoor(z.group,27,26.72,'la casa delle bestie','abattoir',[0,0,7.0],true);
   abattoirDoor.radius = 4.8;
   abattoirDoor.requiredClues = 7;
   addManifesto(z.group, [27, 3.45, 26.78], [0, 0, 0], 'LA CASA\\nDELLE BESTIE', 'INGRESSO / 03:17');
@@ -865,9 +951,9 @@ function buildHome() {
   // An incomplete partition and a narrow dark corridor.
   for(let i=0;i<14;i++){const drip=new THREE.Mesh(new THREE.BoxGeometry(.018,.18+Math.random()*.5,.018),M.rust);drip.position.set(-8.9+Math.random()*17.8,2.7-Math.random()*.8,-8.77);z.group.add(drip);}
   addBox(z.group, -3.2, 1.45, -1.4, .22, 2.9, 6.8, M.darkWall); addBox(z.group, 4.8, 1.45, -2.1, .22, 2.9, 6.0, M.wall);
-  // Kitchen table, mismatched chairs and the permanently humming refrigerator.
-  addBox(z.group, -5.2, .95, 2.0, 3.2, .16, 1.55, M.wood);
-  for (const x of [-6.3, -4.1]) for (const zz of [1.0, 3.0]) { addBox(z.group, x, .48, zz, .16, .95, .16, M.darkWood); addBox(z.group, x, .97, zz - .25, .68, .13, .68, M.wood); }
+  // One substantial kitchen table with proper legs; two chairs have been pushed aside.
+  addWoodTable(z.group,-5.2,2.0,3.15,1.48,.86,23);
+  addWoodChair(z.group,-5.25,.83,0,.96);addWoodChair(z.group,-6.85,2.05,-Math.PI/2,.92);
   addBox(z.group, -8.5, 1.15, -3.8, 1.2, 2.3, 1.25, M.darkWall);
   addBox(z.group, -8.5, 2.34, -3.8, 1.32, .12, 1.35, M.black);
   addLight(z.group, 0xe9c78b, .85, 6, -8.1, 2.2, -3.8);
@@ -886,9 +972,8 @@ function buildHome() {
   addBox(z.group, -1.2, 1.4, -8.2, 2.1, 1.55, .32, M.black);
   const tv = new THREE.Mesh(new THREE.PlaneGeometry(1.75, 1.2), new THREE.MeshBasicMaterial({ map: makeLabelTexture('DOMANDA N. 14', 512, 256), color: 0xb3b1a7 })); tv.position.set(-1.2, 1.42, -8.02); z.group.add(tv);
   addManifesto(z.group,[-9.78,2.1,-2.6],[0,Math.PI/2,0],'NON ASCOLTARE\nPER CAPIRE','CIRCOLARE 14-B');
-  addManifesto(z.group,[.0,3.28,-8.78],[0,0,0],'IL VUOTO\nÈ UNA PORTA','SCRITTO CON FULIGGINE');
-  addCandle(z.group, -5.2, 1.08, 2.0, true);
-  addCandle(z.group, -4.7, 1.08, 1.6, true);
+  // The room is allowed to breathe: one wall text remains, not a slogan on every surface.
+  addCandle(z.group,-5.2,.98,2.0,true);
   addLook(z.group, -4.2, 1.6, -8.1, 'Finestra nord', 'Oltre il vetro, nella nebbia, una fila di figure gira intorno a un fuoco. Una di loro pende da una trave, e il vento non la muove. Si muove solo quando la stanza respira.');
   addLook(z.group, 2.1, 2.2, -8.1, 'Il ritratto', 'Una fotografia di famiglia. Qualcuno ha graffiato via il volto dell’uomo, e i graffi sono ancora lucidi.');
   addDistantRitual(z.group, -4.2, -30);
@@ -918,7 +1003,7 @@ function buildHome() {
   addClueMesh(z.group, new THREE.Vector3(5.8, 1.45, -5.0), 'Battimenti', 'Una forcella d’accordatura. Sul manico è inciso: A=415. La nota non coincide con quella che hai in testa.', 'fork', 'metal');
   addClueMesh(z.group, new THREE.Vector3(1.2, .06, 6.1), 'Trave incisa', 'Nel legno sono incisi ricordi che non sembrano appartenere alla stessa persona: un cane, una festa, una stanza senza porte.', 'beam', 'wood');
   const exit = addDoor(z.group, 0, 8.95, 'la strada', 'road', [0, 0, -3.4]); exit.prompt = '[ E ] TORNA ALLA STRADA';
-  const hatch = addDoor(z.group, 8.7, -6.2, 'la cantina', 'cellar', [0, 0, 4.5], true); hatch.prompt = '[ E ] SCENDI — LA CANTINA';
+  const hatch = addDoor(z.group,8.7,-6.2,'la cantina','cellar',[0,0,4.5],true,{rotationY:Math.PI/2,style:'hatch'}); hatch.prompt = '[ E ] SCENDI — LA CANTINA';
   // The cover is removed as soon as all eight documents have been collected.
   const hatchCover = new THREE.Group();
   hatchCover.name = 'CELLAR_HATCH_COVER';
@@ -969,7 +1054,7 @@ function buildChurch() {
   remo.dialogue = { line: 'La porta non è chiusa. È la stanza a essere dall’altra parte.', choices: ['Che cosa c’è nel disco?', 'Perché la croce è girata?'], replies: ['Un suono che non ha bisogno di essere ascoltato. Un posto che non ha bisogno di essere abitato.', 'Perché la terra guarda il cielo da sotto. Non è una punizione. È una prospettiva.'] };
   const bellMarker=new THREE.Mesh(new THREE.BoxGeometry(.18,.18,.18),M.clue);bellMarker.position.set(-6.8,.12,-5.8);z.group.add(bellMarker);z.interactables.push({id:'bell_event',type:'event',object:bellMarker,point:bellMarker.position,radius:2.8,prompt:'[ E ] TIRA LA CORDA DELLA CAMPANA',run:()=>{audio?.bell();triggerKillScene();}});
   addClueMesh(z.group, new THREE.Vector3(-5.8, 1.7, -13.6), 'Ordine della Messa', 'Il foglio riporta una sequenza di stazioni. La numerazione salta dall’undicesima alla quattordicesima. Sul retro: “nessun funerale”.', 'mass', 'paper');
-  addDoor(z.group, 0, 11.9, 'il sagrato', 'road', [0, 0, -29]);
+  addDoor(z.group,0,11.9,'il sagrato','road',[0,0,-29],false,{style:'roman'});
   z.mist = addFog(z.group, 38, 36, 0xb7bcb8, 67);
   z.solids.push({ minX: -9, maxX: -8.7, minZ: -17, maxZ: 12 }, { minX: 8.7, maxX: 9, minZ: -17, maxZ: 12 }, { minX: -9, maxX: 9, minZ: -17.3, maxZ: -17 }, { minX: -9, maxX: -5, minZ: 11.7, maxZ: 12 }, { minX: 5, maxX: 9, minZ: 11.7, maxZ: 12 });
   return z;
@@ -1091,7 +1176,7 @@ function buildCellar() {
   const cellarBrick=new THREE.Mesh(new THREE.PlaneGeometry(17.2,2.4),M.brick);cellarBrick.position.set(0,1.2,-7.78);z.group.add(cellarBrick);
   for (let i = 0; i < 8; i++) { addBox(z.group, -8 + i * 2.25, 3.05, 0, .18, .2, 16, M.wood); }
   for (let x of [-7, 0, 7]) for (let zz of [-5, 0, 5]) addBox(z.group, x, 1.7, zz, .22, 3.4, .22, M.darkWood);
-  for (let i = 0; i < 7; i++) { addBox(z.group, -6 + i * 2, .52, -1.0, 1.0, .08, .65, M.wood); addBox(z.group, -6 + i * 2, .22, -1.0, .08, .5, .08, M.darkWood); }
+  addWoodTable(z.group,0,-1.0,12.8,1.12,.70,71);
   addCandle(z.group, -2, .62, -1, true, false);
   addCandle(z.group, 2, .62, -1, true, false);
   addLook(z.group, 0, 1.2, -4.2, 'La lampada', 'Una lampada di ferro sopra il piatto. È calda. Non dovrebbe esserlo, perché la corrente è staccata da tre giorni.');
@@ -1102,7 +1187,11 @@ function buildCellar() {
   addBox(z.group, 0, .9, -2.2, 2.2, .9, 1.8, M.darkWood);
   addBox(z.group, 0, 1.38, -2.2, 2.05, .1, 1.65, M.black);
   const platter = new THREE.Mesh(new THREE.CylinderGeometry(.59, .59, .07, 48), M.metal); platter.position.set(0, 1.49, -2.2); z.group.add(platter);
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(.51, .51, .018, 64), mat(0x111210, .24, { metalness: .45 })); disc.position.set(0, 1.54, -2.2); z.group.add(disc);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(.51,.51,.018,64),mat(0x111210,.24,{metalness:.45}));disc.position.set(0,1.54,-2.2);z.group.add(disc);
+  const voidGrowth=new THREE.Group();voidGrowth.visible=false;voidGrowth.scale.setScalar(.001);z.group.add(voidGrowth);storyRef.voidGrowth=voidGrowth;
+  const rootMat=mat(0x313b2d,.98,{map:TEX.wood,bumpScale:.12});
+  for(let i=0;i<9;i++){const a=i/9*Math.PI*2;const curve=new THREE.CatmullRomCurve3([new THREE.Vector3(Math.cos(a)*.48,.035,-2.2+Math.sin(a)*.48),new THREE.Vector3(Math.cos(a)*1.35,.045,-2.2+Math.sin(a)*1.2),new THREE.Vector3(Math.cos(a)*3.1,.06,-2.2+Math.sin(a)*2.2),new THREE.Vector3(Math.cos(a)*5.9,.09,-2.2+Math.sin(a)*3.6)]);voidGrowth.add(new THREE.Mesh(new THREE.TubeGeometry(curve,30,.05,6,false),rootMat));}
+  for(let i=0;i<34;i++){const a=i*2.399,r=1+(i%7)*.72;const leaf=new THREE.Mesh(new THREE.PlaneGeometry(.22+(i%3)*.07,.075),new THREE.MeshStandardMaterial({color:[0x596246,0x343f2d,0x77704d][i%3],roughness:1,side:THREE.DoubleSide,transparent:true,opacity:.92}));leaf.position.set(Math.cos(a)*r,.10+(i%4)*.05,-2.2+Math.sin(a)*r*.66);leaf.rotation.set(-.4,a,.1);voidGrowth.add(leaf);}
   const label = new THREE.Mesh(new THREE.CircleGeometry(.115, 32), mat(0xd1caba, .9)); label.rotation.x = -Math.PI / 2; label.position.set(0, 1.555, -2.2); z.group.add(label);
   const arm = addBox(z.group, .72, 1.65, -2.0, .07, .05, .8, M.gold, { rotation: [0, 0, -.16] });
   // A separate reel-to-reel deck: visible spools turn even though no tape is fitted.
@@ -1204,7 +1293,7 @@ function enterZone(name, spawn) {
   placeStalker(name); showChapterCard(name);
 }
 function currentPosition() { return playerAnchor.position; }
-function playerInputEnabled() { return gameStarted && !gameEnded && !listeningPending && !cultFateActive && !dialogueOpen && !journalOpen && !storyScene; }
+function playerInputEnabled() { return gameStarted && !gameEnded && !listeningPending && !doorTransitioning && !cultFateActive && !dialogueOpen && !journalOpen && !storyScene; }
 
 // -----------------------------------------------------------------------------
 // Sound: entirely synthesised, layered and intentionally non-musical.
@@ -1266,7 +1355,9 @@ class AmbientSound {
   setZone(name){if(!this.ready||!this.ctx)return;this.currentZone=name;const vals={road:.055,home:.11,church:.16,ruin:.20,cellar:.28,abattoir:.32};this.zoneGain.gain.setTargetAtTime(vals[name]??.1,this.ctx.currentTime,1.8);this.noiseGain.gain.setTargetAtTime(({road:.13,home:.2,church:.17,ruin:.26,cellar:.32,abattoir:.38})[name]??.18,this.ctx.currentTime,1.5);}
   powerSurge(){if(!this.ctx)return;const t=this.ctx.currentTime;const o=this.ctx.createOscillator(),g=this.ctx.createGain();o.type='sawtooth';o.frequency.setValueAtTime(38,t);o.frequency.exponentialRampToValueAtTime(430,t+.35);o.frequency.exponentialRampToValueAtTime(27,t+1.1);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.25,t+.04);g.gain.exponentialRampToValueAtTime(.0001,t+1.3);o.connect(g);g.connect(this.master);o.start(t);o.stop(t+1.35);}
   bell(){if(!this.ctx)return;const t=this.ctx.currentTime;[73.4,110,146.8,221].forEach((f,i)=>{const o=this.ctx.createOscillator(),g=this.ctx.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.12/(i+1),t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+5+i);o.connect(g);g.connect(this.master);o.start(t);o.stop(t+6+i);});}
-  killSting(){if(!this.ctx)return;const t=this.ctx.currentTime;const o=this.ctx.createOscillator(),g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();o.type='sawtooth';o.frequency.setValueAtTime(260,t);o.frequency.exponentialRampToValueAtTime(24,t+2.6);f.type='lowpass';f.frequency.value=500;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.38,t+.08);g.gain.exponentialRampToValueAtTime(.0001,t+3);o.connect(f);f.connect(g);g.connect(this.master);o.start(t);o.stop(t+3.1);} 
+  killSting(){if(!this.ctx)return;const t=this.ctx.currentTime;const o=this.ctx.createOscillator(),g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();o.type='sawtooth';o.frequency.setValueAtTime(260,t);o.frequency.exponentialRampToValueAtTime(24,t+2.6);f.type='lowpass';f.frequency.value=500;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.38,t+.08);g.gain.exponentialRampToValueAtTime(.0001,t+3);o.connect(f);f.connect(g);g.connect(this.master);o.start(t);o.stop(t+3.1);}
+  doorCreak(){if(!this.ctx||!this.ready||muted)return;this.mechanicalNoise(.16,1700,7,.12,(Math.random()-.5)*.25);setTimeout(()=>{if(!muted){this.mechanicalNoise(1.25,430,2.1,.18,.08);this.mechanicalTone(185,48,1.2,'sawtooth',.045,.08);}},75);setTimeout(()=>{if(!muted)this.mechanicalNoise(.14,2300,8,.075,-.08);},610);}
+  voidBloom(){if(!this.ctx||!this.ready||muted)return;this.mechanicalNoise(5.8,180,.48,.19,0);this.mechanicalTone(38,14,6.2,'sine',.12,0);this.whisper(4.6,-.18);}
   mechanicalNoise(duration=.7, frequency=700, q=1.2, volume=.14, pan=0) {
     if(!this.ctx||!this.ready||muted)return;const t=this.ctx.currentTime;
     const length=Math.ceil(this.ctx.sampleRate*duration);const buffer=this.ctx.createBuffer(1,length,this.ctx.sampleRate);const data=buffer.getChannelData(0);let last=0;
@@ -1425,7 +1516,8 @@ function chooseDialogue(npc, index) {
   const lower=(npc.name||'').toLowerCase();
   if(lower==='ines'){storyFlags.add(index===0?'ines-trust':'ines-betrayed');}
   if(lower==='sergio'){storyFlags.add(index===0?'sergio-truth':'sergio-silence');}
-  if(lower==='dario'||lower==='il primo'){storyFlags.add(index===0?'challenged-leader':'accepted-leader');}
+  if(lower==='dario'){storyFlags.add(index===0?'challenged-leader':'accepted-leader');}
+  if(lower==='il primo'&&!npc.isOpeningPrimo){storyFlags.add(index===0?'challenged-leader':'accepted-leader');}
   if(lower==='ottavio'&&index===1)storyFlags.add('ottavio-audio');
   if(lower==='anna')storyFlags.add(index===0?'anna-mercy':'anna-table');
   $('subtitle').textContent = reply; speakVoice(reply,npc.name); $('dialogue-options').innerHTML = '<button class="dialogue-option" id="dialogue-end"><b>[↵]</b>Non aggiungere altro.</button>'; 
@@ -1464,7 +1556,7 @@ function inspectTarget(item) {
       audio.stinger(.22);
       return;
     }
-    enterZone(item.destination, item.spawn); return;
+    activateDoor(item); return;
   }
   if (item.type === 'listen') { beginListening(); return; }
   if (item.type === 'look') { showLook(item); return; }
@@ -1473,6 +1565,13 @@ function inspectTarget(item) {
   if (item.type === 'dig') { return; }
   if (item.type === 'egg') { collectRelic(item); return; }
   if (item.type === 'story') { item.run(); return; }
+}
+function activateDoor(item){
+  if(doorTransitioning||item._opening)return;doorTransitioning=true;item._opening=true;keys.clear();audio?.doorCreak();
+  const pivot=item.doorPivot;
+  if(!pivot){setTimeout(()=>{doorTransitioning=false;item._opening=false;enterZone(item.destination,item.spawn);},360);return;}
+  const from=pivot.rotation.y,to=item.openAngle??-1.08,start=performance.now(),duration=520;
+  const swing=()=>{const k=Math.min(1,(performance.now()-start)/duration),ease=1-Math.pow(1-k,3);pivot.rotation.y=from+(to-from)*ease;if(k<1)requestAnimationFrame(swing);else setTimeout(()=>{doorTransitioning=false;item._opening=false;enterZone(item.destination,item.spawn);},110);};swing();
 }
 function beginListening() {
   if (collected.size < clueCount) { showToast('IL PIATTO È VUOTO. NON HAI ANCORA PORTATO ABBASTANZA STANZA QUI SOTTO.'); return; }
@@ -1488,22 +1587,34 @@ function beginListening() {
   speakVoice('Non abbassare gli occhi. La stanza deve svuotarsi prima che tu possa scegliere.','REGISTRAZIONE 14-B');
   if(!cultFateActive && cultFateQueue.length===0) finishListening();
 }
-function finishListening() {
-  if(!listeningPending)return;
-  listeningPending=false;gameEnded=true;controls.unlock();keys.clear();$('hud').classList.add('hidden-hud');
-  const screen=$('ending-screen');screen.classList.add('active');
-  $('ending-title').textContent='Il Bianco non è stato ascoltato.';
-  $('ending-copy').textContent='Tredici persone hanno lasciato la stanza. La macchina continua a girare: il piatto è vuoto, ma nessuno ha più un nome da offrirgli.';
-  $('ending-small').textContent='I TREDICI SONO USCITI. RESTA IL TUO NOME.';
-  $('ending-choices').classList.add('visible'); $('ending-testimony').style.display = storyFlags.has('grave-revealed') ? '' : 'none';$('ending-result').classList.remove('visible');
-  speakVoice('Tredici posti vuoti. Ora scegli che cosa fare del tuo.','REGISTRAZIONE 14-B');
+function finishListening(){
+  if(!listeningPending)return;listeningPending=false;gameEnded=true;controls.unlock();keys.clear();$('hud').classList.add('hidden-hud');
+  $('ending-screen').classList.remove('active');$('ending-choices').classList.remove('visible');$('ending-result').classList.remove('visible');
+  $('ending-title').textContent='Il Bianco non è stato ascoltato.';$('ending-copy').textContent='Il silenzio non è rimasto nella stanza.';$('ending-small').textContent='LA NEBBIA NON È UN CONFINE.';
+  playerAnchor.position.set(0,0,0);camera.position.set(0,1.63,0);camera.rotation.set(0,0,0);
+  const growth=storyRef.voidGrowth;if(growth){growth.visible=true;growth.scale.setScalar(.001);}
+  if(audio?.master&&audio.ctx)audio.master.gain.setTargetAtTime(.34,audio.ctx.currentTime,1.4);
+  storyScene={type:'ending',t:0,dur:22,i:0,switched:false,lines:[
+    [.6,'Voice: The room does not become empty. It lends its emptiness to the weather.'],
+    [4.8,'Voice: The fog is not a veil. It is what remains when a name stops insisting on its outline.'],
+    [9.4,'Il Primo: You see? Nothing has been taken from you. You are only returning what you have been calling yourself.'],
+    [14.2,'Voice: The reeds bend toward the hollow. The trees make room without asking what has left.'],
+    [19,'Voice: For a moment, the world has no witness. It does not stop growing.']
+  ]};audio?.voidBloom();
 }
+function revealEndingChoices(){
+  storyScene=null;$('subtitle-wrap').classList.remove('visible');$('ending-screen').classList.add('active');
+  $('ending-title').textContent='Il Bianco non è stato ascoltato.';$('ending-copy').textContent='The turntable is still in the cellar. The forest has made a place the size of a person.';
+  $('ending-small').textContent='I TREDICI SONO USCITI. RESTA CIÒ CHE HAI LASCIATO.';$('ending-choices').classList.add('visible');
+  $('ending-testimony').style.display=storyFlags.has('grave-revealed')?'':'none';$('ending-result').classList.remove('visible');
+}
+
 function resolveEnding(choice) {
   const choices={
-    testimony:{title:'La registrazione dei nomi',copy:'Hai letto i tredici nomi ad alta voce, uno per uno, davanti al piatto che gira. Il disco non ha risposto. Per la prima volta, qualcuno nella stanza ha ascoltato un nome invece di un suono.',small:'FINALE IV / TESTIMONIANZA',voice:'Aurelio. Ines. Dario. Sergio. Nessuno di voi era il disco.'},
-    fill:{title:'Il quattordicesimo posto',copy:'Hai consegnato il tuo nome. Nessuno ha ascoltato il disco. La stanza ha imparato a usare la tua voce come una sedia.',small:'FINALE I / RIEMPIMENTO',voice:'Hai lasciato il tuo nome sul tavolo. Ora la stanza può parlare.'},
-    expose:{title:'La finestra aperta',copy:'Hai interrotto la corrente e spalancato le finestre. Le tredici persone del 1977 non erano state uccise da una canzone: il gas aveva tolto l’aria alla stanza. I tredici hanno già lasciato la casa; nessuna spiegazione restituisce loro un volto.',small:'FINALE II / ARIA',voice:'La stanza era satura. Non era il disco. Non era soltanto il disco.'},
-    preserve:{title:'La registrazione senza nastro',copy:'Hai lasciato tutto com’era. Il piatto continua a girare. Quando esci, il tuo posto è già occupato da qualcuno che ha il tuo cappotto.',small:'FINALE III / CONSERVAZIONE',voice:'Non hai scelto. È una scelta che la stanza conosce bene.'}
+    testimony:{title:'I nomi hanno messo radici',copy:'Hai pronunciato i tredici nomi come si chiamano le persone da una finestra. Nel bosco, tredici foglie si sono fermate controvento. Non erano tornati: per la prima volta, però, non erano più soltanto una forma cancellata. La nebbia ha lasciato passare la luce senza dissolverli.',small:'FINALE IV / TESTIMONIANZA',voice:'Aurelio. Ines. Dario. Sergio. Non siete il disco. Siete stati qui.'},
+    fill:{title:'Il posto ha imparato il tuo nome',copy:'Hai lasciato che Il Primo ti chiamasse per nome, e hai smesso di correggerlo. La figura nel bosco ha riempito il proprio cappotto con la tua assenza. La casa resta illuminata: qualcuno dovrà pur aprire la porta al prossimo arrivato.',small:'FINALE I / RIEMPIMENTO',voice:'Non ti hanno portato via. Ti hanno convinto a lasciare il posto.'},
+    expose:{title:'La stanza ha restituito il respiro',copy:'Hai aperto le finestre. L’aria è entrata dal bosco e ha attraversato la casa senza chiedere permesso. La nebbia ha portato fuori la polvere, ma ha lasciato sul pavimento un contorno asciutto: il posto che occupavi. Non c’è salvezza nel vuoto; c’è almeno spazio per respirare.',small:'FINALE II / ARIA',voice:'La stanza era satura. La verità non restituisce i morti, ma può restituire aria.'},
+    preserve:{title:'La nebbia ha conservato la forma',copy:'Non hai toccato nulla. Le finestre restano chiuse, gli alberi oscillano fuori tempo e il piatto continua a girare senza nastro. La figura che ti assomiglia resta fra i tronchi, intatta soltanto perché nessuno la guarda abbastanza a lungo.',small:'FINALE III / CONSERVAZIONE',voice:'Non hai scelto. Anche la nebbia sa conservare una forma.'}
   };
   const result={...(choices[choice]||choices.preserve)};
   if(choice==='expose' && storyFlags.has('sergio-truth')) result.copy='Sergio ti ha lasciato il foglio con la diagnosi: monossido di carbonio, ventilazione ostruita, tredici persone morte senza aver mai ascoltato il disco. Hai aperto le finestre. La spiegazione non restituisce i tredici, ma spezza la liturgia.';
@@ -1983,7 +2094,8 @@ function applyConsequences(npc, index) {
   if (key === 'dario' && index === 1) { storyFlags.add('primo-alerted'); showToast('IL PRIMO HA SENTITO IL TUO NOME.'); }
   if (key === 'anna' && index === 1) { queueCultFate('il piatto di Anna', npc, 'collapse'); }
   if (key === 'sergio' && index === 1) { fear = Math.min(1, fear + .05); }
-  if (key === 'il primo') { const d = primoDialogue(); d.actions?.[index]?.(); }
+  if (key === 'il primo' && npc.isOpeningPrimo) { storyFlags.add('met-primo'); storyFlags.add('primo-first-contact'); }
+  else if (key === 'il primo') { const d = primoDialogue(); d.actions?.[index]?.(); }
   if (storyFlags.has('primo-alerted')) placeStalker(currentZone);
   updateMissions();
 }
@@ -2286,27 +2398,25 @@ function buildForest() {
   addBox(g, 0, 1.5, 0, .1, 3, .1, mat(0x111111));
   addBox(g, 0, 3.05, 0, .4, .2, .4, glow(0xffb060, 1.8));
   const car = buildCar(); car.visible = false; g.add(car); storyRef.car = car;
-  const ch = makeStalker(); ch.visible = false; g.add(ch); storyRef.chaser = ch;
+  const ch=makeStalker();ch.visible=false;g.add(ch);storyRef.chaser=ch;
+  const voidFigure=new THREE.Group();voidFigure.visible=false;voidFigure.position.set(0,0,-29);g.add(voidFigure);
+  const bodyMat=new THREE.MeshStandardMaterial({color:0x111512,roughness:1,transparent:true,opacity:.66});
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(.42,1.2,7,12),bodyMat);body.position.y=1.18;voidFigure.add(body);
+  const headMat=new THREE.MeshStandardMaterial({color:0x0b0d0b,roughness:1,transparent:true,opacity:.50});
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.24,12,10),headMat);head.position.y=2.42;voidFigure.add(head);
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(1.45,.035,6,44),new THREE.MeshBasicMaterial({color:0x9ca58f,transparent:true,opacity:.28}));ring.rotation.x=-Math.PI/2;ring.position.y=.04;voidFigure.add(ring);storyRef.voidFigure=voidFigure;
+  storyRef.voidLeaves=[];
+  for(let i=0;i<42;i++){const leaf=new THREE.Mesh(new THREE.PlaneGeometry(.18+(i%4)*.045,.055+(i%3)*.02),new THREE.MeshStandardMaterial({color:[0x5c6245,0x77714e,0x333d2d][i%3],roughness:1,transparent:true,opacity:.82,side:THREE.DoubleSide}));leaf.position.set(Math.cos(i*2.399)*(2.8+(i%3)),.18+(i%6)*.23,-29+Math.sin(i*2.399)*(2+(i%4)));leaf.userData={phase:i*2.399,radius:Math.hypot(leaf.position.x,leaf.position.z+29),height:leaf.position.y};g.add(leaf);storyRef.voidLeaves.push(leaf);}
 }
 // Il Primo: friendly on the surface, and every task he gives brings the new arrival closer to the void.
-function primoDialogue() {
-  const f = storyFlags;
-  if (f.has('escaped-forest')) return {
-    line: 'You came back alive. Most people who follow me into the forest stay to hear what I was going to say. Sit down. We can begin again.',
-    choices: ['I want to leave the abattoir.'],
-    replies: ['Then go. The house will keep your place warm, and the lamp will stay lit for you.'],
-    actions: [() => storyFlags.add('primo-leave')] };
-  if (f.has('primo-task-dig') && f.has('primo-task-candles')) return {
-    line: 'The album is not finished. It only waits for the room to be empty, and you have been emptying it for us all evening.',
-    choices: ['Take me to the car.', 'I want to leave.'],
-    replies: ['Good. The forest is quieter than this room, and nobody hears a car there.', 'Then leave. But the only light on the road belongs to the church, and it is waiting for you too.'],
-    actions: [() => { storyFlags.add('car-invited'); pendingCar = true; }, () => storyFlags.add('primo-leave')] };
-  return {
-    line: 'Good. You listened to the wrong things first, which is how everyone arrives. Let me give you something to do with your hands while you decide what you came for.',
-    choices: ['Why must I dig a grave?', 'What are the candles for?', 'Take me somewhere quiet.'],
-    replies: ['The ground under the willow remembers the first name we lost. Dig it up, and you will understand why we never say it aloud.', 'Three flames on the altar, so the choir can see where to fall. Light them, and the house will stop asking you questions.', 'Get in the car. There is a quiet place in the forest. Nobody hears a car in the forest.'],
-    actions: [() => storyFlags.add('primo-task-dig'), () => storyFlags.add('primo-task-candles'), () => { storyFlags.add('car-invited'); pendingCar = true; }] };
+function primoDialogue(){
+  const f=storyFlags;
+  if(f.has('escaped-forest'))return{line:'You came back. I thought you might. There is a particular way a person walks after seeing the place where they would disappear. You do not have to tell me what you saw.',choices:['I want to leave.','Why did you bring me there?'],replies:['Of course. I would never keep you. The door is open; you only have to decide which side of it you are on.','I wanted you to hear the trees without the village speaking over them. You heard something. That is not the same as understanding it.'],actions:[()=>storyFlags.add('primo-leave'),()=>storyFlags.add('primo-questioned')]};
+  if(f.has('primo-task-dig')&&f.has('primo-task-candles'))return{line:'The album is almost ready. You have done more than I asked, and I am grateful. But you have started looking at the doors instead of the rooms. That usually means a person is close to deciding.',choices:['Take me to the car.','I want to leave.','What do you need from me?'],replies:['Good. We can speak where the walls cannot interrupt. The forest is quieter than this room.','Then go. I will not follow. I only hope you do not mistake the road for an answer.','Nothing you do not already know how to give. A little attention. A little space. Your name, perhaps, if you still feel it belongs to you.'],actions:[()=>{storyFlags.add('car-invited');pendingCar=true;},()=>storyFlags.add('primo-leave'),()=>storyFlags.add('primo-questioned')]};
+  if(f.has('met-primo'))return{line:'You remember the lamp. I was glad to see you reach it. You looked relieved when I spoke to you. People rarely notice how much they need that small kindness until it is offered.',choices:['You made this place feel safe.','You knew I was coming.','Why are you helping me?'],replies:['I wanted you to feel there was somewhere to return to. A person will walk a very long way if they believe someone has noticed their arrival.','I knew the letter would find you. I did not know what you would bring with you. That part is always your own.','Because carrying yourself everywhere is exhausting. I thought you might want to set something down.'],actions:[()=>storyFlags.add('primo-trust'),()=>storyFlags.add('primo-suspicion'),()=>storyFlags.add('primo-questioned')]};
+  return{line:'Good. You listened to the wrong things first, which is how everyone arrives. Let me give you something to do with your hands while you decide what you came for.',choices:['Why must I dig a grave?','What are the candles for?','Take me somewhere quiet.'],replies:['The ground under the willow remembers the first name we lost. Dig it up, and you will understand why we never say it aloud.','Three flames on the altar, so the choir can see where to fall. Light them, and the house will stop asking you questions.','Get in the car. There is a quiet place in the forest. Nobody hears a car in the forest.'],actions:[()=>storyFlags.add('primo-task-dig'),()=>storyFlags.add('primo-task-candles'),()=>{storyFlags.add('car-invited');pendingCar=true;}]};
 }
+
 function storyLine(text) {
   const m = /^([^:]+):\s*/.exec(text);
   $('speaker').textContent = m ? m[1].toUpperCase() : 'VOICE';
@@ -2375,10 +2485,28 @@ function updateStoryScene(dt, t) {
     camera.lookAt(car.position.x + .02, 1.05, car.position.z - 6);
     if (s.t >= s.dur) endCarScene();
   } else if (s.type === 'confession') {
-    camera.position.set(6.5, 1.25, -7.7); camera.lookAt(6.5, 1.35, -10.6);
-    const hand = storyRef.hand, rise = THREE.MathUtils.clamp((s.t - 15.5) / 1.4, 0, 1), sink = THREE.MathUtils.clamp((s.t - 18) / 1.4, 0, 1);
-    hand.visible = s.t > 15.5; hand.position.y = -1 + 2.7 * rise - 2.7 * sink; hand.rotation.z = Math.sin(s.t * 3) * .14;
-    if (s.t >= s.dur) endConfession();
+    camera.position.set(6.5,1.25,-7.7);camera.lookAt(6.5,1.35,-10.6);
+    const hand=storyRef.hand,rise=THREE.MathUtils.clamp((s.t-15.5)/1.4,0,1),sink=THREE.MathUtils.clamp((s.t-18)/1.4,0,1);
+    hand.visible=s.t>15.5;hand.position.y=-1+2.7*rise-2.7*sink;hand.rotation.z=Math.sin(s.t*3)*.14;if(s.t>=s.dur)endConfession();
+  } else if(s.type==='ending'){
+    const growth=storyRef.voidGrowth;
+    if(s.t<8.2){
+      const a=THREE.MathUtils.smoothstep(s.t,0,8.2);
+      camera.position.set(Math.sin(s.t*.22)*.035,1.63-a*.22,-.10-a*.55);camera.lookAt(0,1.48,-2.2);
+      if(growth){growth.visible=true;growth.scale.setScalar(.001+THREE.MathUtils.smoothstep(s.t,1.4,8.1));}
+      if(scene.fog)scene.fog.density=.062+a*.018;scene.background.lerp(new THREE.Color(0x777e76),Math.min(1,a));
+    }else{
+      if(!s.switched){
+        s.switched=true;zones.cellar.group.visible=false;zones.forest.group.visible=true;zone=zones.forest;currentZone='forest';playerAnchor.position.set(0,0,0);camera.position.set(0,2.15,3.8);
+        zones.forest.fogColor=0xc4cbc5;zones.forest.density=.024;scene.background.set(0xc4cbc5);scene.fog=new THREE.FogExp2(0xc4cbc5,.024);
+        $('location').textContent='BOSCO / LA FORMA DEL VUOTO';audio?.setZone('forest');if(storyRef.voidFigure)storyRef.voidFigure.visible=true;storyRef.voidLeaves?.forEach(l=>l.visible=true);
+      }
+      const travel=THREE.MathUtils.smoothstep(s.t,8.2,19.8);camera.position.set(Math.sin(s.t*.18)*.06,2.15+Math.sin(s.t*.4)*.035,3.8-travel*24.5);camera.lookAt(0,1.65,-29);
+      const figure=storyRef.voidFigure;
+      if(figure){const vanish=THREE.MathUtils.smoothstep(s.t,15,20.5);figure.scale.set(1+vanish*.35,1+vanish*.55,1+vanish*.35);figure.children.forEach(o=>{if(o.material&&'opacity'in o.material)o.material.opacity=(o.geometry?.type==='TorusGeometry'?.28:.60)*(1-vanish);});}
+      storyRef.voidLeaves?.forEach((leaf,i)=>{const phase=leaf.userData.phase,pull=THREE.MathUtils.smoothstep(s.t,14,20.8),r=leaf.userData.radius*(1-pull*.96);leaf.position.set(Math.cos(phase+s.t*.52)*r,leaf.userData.height+Math.sin(s.t*.7+phase)*.18,-29+Math.sin(phase+s.t*.52)*r*.72);leaf.rotation.z+=.012+(i%4)*.002;leaf.material.opacity=.82*(1-pull);});
+      if(s.t>=s.dur)revealEndingChoices();
+    }
   }
 }
 function endCarScene() {
@@ -2530,7 +2658,8 @@ function startIntro() {
     [19, 'Voice: A letter came, with a name in it. I answered by walking, because walking asks nothing back.'],
     [25, 'Voice: The house at the end of the road has waited a long time for someone who listens. I am only the one who did not leave.'],
     [31, 'Voice: Stay quiet. The fog is listening too, and it does not repeat what it hears.'],
-    [37, 'Voice: The lamp is lit. Someone is holding the door open.']] };
+    [37, 'Voice: The lamp is lit. Someone is holding the door open.'],
+    [40, 'Il Primo: Good evening. You found us. I kept the light on.']] };
 }
 function endIntro() {
   storyScene = null; $('intro-dark').style.opacity = '0';
