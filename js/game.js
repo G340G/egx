@@ -506,13 +506,22 @@ function addDoor(group, x, z, label, destination, spawn, locked = false) {
   const entry = { id: `door_${destination}`, type: 'door', object: root, point: root.position, radius: 3.3, prompt: locked ? '[ E ] LA BOTOLA È BLOCCATA' : `[ E ] ENTRA — ${label.toUpperCase()}`, label, destination, spawn, locked, slab };
   group.userData.interactables.push(entry); return entry;
 }
-function addHouseExterior(group, x, z, w, d, h, seed = 1, color = 0x85877f) {
+function addHouseExterior(group, x, z, w, d, h, seed = 1, color = 0x85877f, frontDoor = false) {
   const g = new THREE.Group(); g.position.set(x, 0, z); group.add(g);
   const wallMat = mat(color, 1, { map: TEX.plaster });
   addBox(g, 0, h / 2, -d / 2, w, h, .42, wallMat);
   addBox(g, -w / 2, h / 2, 0, .42, h, d, wallMat);
   addBox(g, w / 2, h / 2, 0, .42, h, d, wallMat);
-  addBox(g, 0, h / 2, d / 2, w, h, .42, wallMat);
+  if (frontDoor) {
+    // Split the front facade around a proper, walk-through doorway.
+    const openingW = 2.2, openingH = 2.55;
+    const sideW = (w - openingW) / 2;
+    addBox(g, -(openingW + sideW) / 2, h / 2, d / 2, sideW, h, .42, wallMat);
+    addBox(g, (openingW + sideW) / 2, h / 2, d / 2, sideW, h, .42, wallMat);
+    addBox(g, 0, openingH + (h - openingH) / 2, d / 2, openingW, h - openingH, .42, wallMat);
+  } else {
+    addBox(g, 0, h / 2, d / 2, w, h, .42, wallMat);
+  }
   // A crude pitched roof assembled from two dark planes.
   const roofMat = mat(0x292a27, 1, { map: TEX.concrete });
   const r1 = addBox(g, -w * .24, h + .48, 0, w * .58, .22, d + .8, roofMat, { rotation: [0, 0, -.28] });
@@ -796,7 +805,7 @@ function buildRoad() {
   addHouseExterior(z.group, 0, -15, 15, 13, 5.4, 2, 0x87867b);
   addHouseExterior(z.group, 37, -25, 12, 15, 7.2, 3, 0x656860);
   addHouseExterior(z.group, -36, -14, 12, 10, 4.8, 4, 0x77766c);
-  addHouseExterior(z.group, 27, 22, 10, 9, 4.2, 5, 0x555a55);
+  addHouseExterior(z.group, 27, 22, 10, 9, 4.2, 5, 0x555a55, true);
   addRoadSurfaceDetails(z.group); addWoodPavement(z.group,27,10.2,18.2,3.3); addMachineComplex(z.group);
   // The farmhouse's false golden window.
   addLight(z.group, 0xffb35d, 2.1, 18, 0, 2.0, -7, { decay: 1.5 });
@@ -811,7 +820,11 @@ function buildRoad() {
   addDoor(z.group, 0, -7.0, 'la casa', 'home', [0, 0, 6.2]);
   addDoor(z.group, 37, -17.1, 'la chiesa', 'church', [0, 0, 9.4]);
   addDoor(z.group, -36, -8.6, 'la casa vuota', 'ruin', [0, 0, 5.8]);
-  addDoor(z.group, 27, 28.3, 'la casa delle bestie', 'abattoir', [0,0,7.0]);
+  const abattoirDoor = addDoor(z.group, 27, 26.5, 'la casa delle bestie', 'abattoir', [0,0,7.0], true);
+  abattoirDoor.radius = 4.8;
+  abattoirDoor.requiredClues = 7;
+  addManifesto(z.group, [27, 3.45, 26.78], [0, 0, 0], 'LA CASA\\nDELLE BESTIE', 'INGRESSO / 03:17');
+  addLight(z.group, 0xffb35d, 1.25, 7, 27, 2.5, 27.6, { decay: 1.5 });
   addManifesto(z.group,[-9.5,2.0,-5.8],[0,.12,0],'SVUOTARSI\nPER ESSERE RIEMPITI','AFFISSO DEL CONSORZIO / 1977');
   addManifesto(z.group,[15.5,1.85,14.1],[0,Math.PI,0],'13 + 1 = 0','FOGLIO APPESO DAL LATO SBAGLIATO');
   // Clue at the roadside mailbox.
@@ -832,6 +845,14 @@ function buildRoad() {
   z.mist = addFog(z.group, 95, 125, 0xe1e3df, 49);
   z.fog = new THREE.FogExp2(z.fogColor, z.density);
   solid(z, 0, -15, 15.5, 13.5); solid(z, 37, -25, 12.5, 15.5); solid(z, -36, -14, 12.5, 10.5); solid(z, 24, 5, 16.5, 12.5);
+  // Keep a clear approach to the abattoir threshold; the doorway itself is not blocked.
+  z.solids.push(
+    { minX: 21.7, maxX: 22.3, minZ: 17.25, maxZ: 26.75 },
+    { minX: 31.7, maxX: 32.3, minZ: 17.25, maxZ: 26.75 },
+    { minX: 22, maxX: 32, minZ: 17.25, maxZ: 17.75 },
+    { minX: 22, maxX: 25.9, minZ: 26.25, maxZ: 26.75 },
+    { minX: 28.1, maxX: 32, minZ: 26.25, maxZ: 26.75 }
+  );
   return z;
 }
 function buildHome() {
@@ -898,9 +919,13 @@ function buildHome() {
   addClueMesh(z.group, new THREE.Vector3(1.2, .06, 6.1), 'Trave incisa', 'Nel legno sono incisi ricordi che non sembrano appartenere alla stessa persona: un cane, una festa, una stanza senza porte.', 'beam', 'wood');
   const exit = addDoor(z.group, 0, 8.95, 'la strada', 'road', [0, 0, -3.4]); exit.prompt = '[ E ] TORNA ALLA STRADA';
   const hatch = addDoor(z.group, 8.7, -6.2, 'la cantina', 'cellar', [0, 0, 4.5], true); hatch.prompt = '[ E ] SCENDI — LA CANTINA';
-  // Hide the hatch behind a stack of coal sacks until evidence is gathered.
-  addBox(z.group, 8.6, .46, -5.0, 1.4, .9, 1.1, M.darkWall);
-  addBox(z.group, 7.5, .33, -5.7, .8, .65, .7, M.rust);
+  // The cover is removed as soon as all eight documents have been collected.
+  const hatchCover = new THREE.Group();
+  hatchCover.name = 'CELLAR_HATCH_COVER';
+  z.group.add(hatchCover);
+  z.hatchCover = hatchCover;
+  addBox(hatchCover, 8.6, .46, -5.0, 1.4, .9, 1.1, M.darkWall);
+  addBox(hatchCover, 7.5, .33, -5.7, .8, .65, .7, M.rust);
   z.mist = addFog(z.group, 32, 23, 0xaeb0a9, 27);
   // Collision strips keep the player inside, leaving a gap for the front door.
   z.solids.push({ minX: -10, maxX: -9.7, minZ: -9, maxZ: 9 }, { minX: 9.7, maxX: 10, minZ: -9, maxZ: 9 }, { minX: -9, maxX: -4, minZ: 8.7, maxZ: 9 }, { minX: 4, maxX: 9, minZ: 8.7, maxZ: 9 }, { minX: -9, maxX: 9, minZ: -9, maxZ: -8.7 });
@@ -1049,7 +1074,9 @@ function buildAbattoir() {
   // A passage that returns the player to the same room from the wrong direction.
   const loopMarker=new THREE.Mesh(new THREE.BoxGeometry(.4,.12,.4),M.gold);loopMarker.position.set(-8,.1,6.8);z.group.add(loopMarker);
   z.interactables.push({id:'impossible_threshold',type:'event',object:loopMarker,point:loopMarker.position,radius:2.6,prompt:'[ E ] ATTRAVERSA LA SOGLIA CUCITA',run:()=>{playerAnchor.position.set(8.4,0,-6.8);camera.rotation.y+=Math.PI;glitchPulse=1.35;audio?.mechanicalEvent('latch');showToast('SEI ENTRATO DALLA STESSA PORTA. LA POLVERE È DALL’ALTRO LATO.');storyFlags.add('crossed-impossible');}});
-  addClueMesh(z.group,new THREE.Vector3(-8.6,1.35,-8.8),'Registro della macelleria','Il registro non riporta animali acquistati. Riporta tredici nomi, ciascuno cancellato dopo una singola data: 03:17.','butcher-ledger','paper');
+  addClueMesh(z.group,new THREE.Vector3(-7.6,1.35,-7.2),'Registro della macelleria','Il registro non riporta animali acquistati. Riporta tredici nomi, ciascuno cancellato dopo una singola data: 03:17.','butcher-ledger','paper');
+  const ledgerEntry = z.interactables.find(item => item.id === 'butcher-ledger');
+  if (ledgerEntry) ledgerEntry.radius = 4.2;
   addDoor(z.group,0,9.85,'la strada','road',[27,0,29]);
   z.mist=addFog(z.group,32,27,0x8b8177,113);
   z.solids.push({minX:-12,maxX:-11.7,minZ:-10,maxZ:10},{minX:11.7,maxX:12,minZ:-10,maxZ:10},{minX:-12,maxX:12,minZ:-10.2,maxZ:-9.8},{minX:-12,maxX:-4.5,minZ:9.7,maxZ:10},{minX:4.5,maxX:12,minZ:9.7,maxZ:10});
@@ -1122,6 +1149,8 @@ function buildCellar() {
 buildRoad(); buildHome(); buildChurch(); buildRuin(); buildAbattoir(); buildCellar(); buildStoryExtras();
 
 // The cellar is deliberately inaccessible until all eight traces have been read.
+const abattoirEntrance = zones.road.interactables.find(i => i.destination === 'abattoir');
+if (abattoirEntrance) abattoirEntrance.requiredClues = 7;
 const cellarDoor = zones.home.interactables.find(i => i.destination === 'cellar');
 
 function enterZone(name, spawn) {
@@ -1292,8 +1321,24 @@ function updateProgress() {
   $('inventory-count').textContent = String(n);
   $('progress-fill').style.width = `${n / clueCount * 100}%`;
   if (n === 0) $('objective-text').textContent = 'Trova la casa. Cerca il luogo dove vengono appese le bestie.';
-  else if (n < clueCount) $('objective-text').textContent = 'Otto documenti. Tredici persone. La stanza si svuota.';
-  else $('objective-text').textContent = 'La stanza sotto la casa ha aperto la bocca. Scendi quando sei pronto.';
+  else if (n < 7) $('objective-text').textContent = 'Raccogli 7 tracce per aprire la Casa delle Bestie. Segui il passaggio di assi verso est.';
+  else if (n === 7) $('objective-text').textContent = currentZone === 'abattoir'
+    ? '7 / 8 TRACCE — Cerca il Registro della macelleria sul lato nord-ovest del macello.'
+    : '7 / 8 TRACCE — La Casa delle Bestie è a est, in fondo al passaggio di assi. Il Registro della macelleria è l’ottava traccia.';
+  else $('objective-text').textContent = currentZone === 'cellar'
+    ? '8 / 8 TRACCE — Avvicinati al piatto nero e premi E per ascoltare Il Bianco.'
+    : currentZone === 'home'
+      ? '8 / 8 TRACCE — La copertura della botola è stata rimossa. Scendi in cantina.'
+      : '8 / 8 TRACCE — Torna alla casa principale e scendi dalla botola in cucina.';
+  if (abattoirEntrance) {
+    const unlocked = n >= (abattoirEntrance.requiredClues || 7);
+    abattoirEntrance.locked = !unlocked;
+    abattoirEntrance.prompt = unlocked
+      ? '[ E ] ENTRA — LA CASA DELLE BESTIE'
+      : `[ E ] BLOCCATO — SERVONO 7 TRACCE (${n}/7)`;
+    if (abattoirEntrance.slab) abattoirEntrance.slab.material = unlocked ? M.wood : M.rust;
+  }
+  if (zones.home?.hatchCover) zones.home.hatchCover.visible = n < clueCount;
   if (cellarDoor) {
     cellarDoor.locked = n < clueCount;
     cellarDoor.prompt = n < clueCount ? `[ E ] BLOCCATO — MANCA ${clueCount - n} TRACCE` : '[ E ] SCENDI — LA CANTINA';
@@ -1374,7 +1419,12 @@ function inspectTarget(item) {
   if (item.type === 'event') { if(item.used)return;item.used=true;const ix=zone.interactables.indexOf(item);if(ix>=0)zone.interactables.splice(ix,1);item.run?.();return; }
   if (item.type === 'npc') { openDialogue(item); return; }
   if (item.type === 'door') {
-    if (item.locked && collected.size < clueCount) { showToast(`MANCANO ${clueCount - collected.size} TRACCE. LA PORTA NON RICONOSCE LE TUE MANI.`); audio.stinger(.22); return; }
+    const required = item.requiredClues ?? (item.locked ? clueCount : 0);
+    if (collected.size < required) {
+      showToast(`MANCANO ${required - collected.size} TRACCE. LA PORTA NON RICONOSCE LE TUE MANI.`);
+      audio.stinger(.22);
+      return;
+    }
     enterZone(item.destination, item.spawn); return;
   }
   if (item.type === 'listen') { beginListening(); return; }
@@ -1867,6 +1917,17 @@ const MISSIONS = [
   { id: 'primo', text: 'Il Primo ha sentito il tuo nome. Non lasciare che ti raggiunga mentre lo guardi.', when: () => storyFlags.has('primo-alerted'), done: () => false }
 ];
 function currentMissionText() {
+  // Main evidence progression takes precedence over optional side missions.
+  if (collected.size === 7) {
+    return currentZone === 'abattoir'
+      ? '7 / 8 TRACCE — Il Registro della macelleria è sul lato nord-ovest, vicino alla parete di fondo.'
+      : '7 / 8 TRACCE — Vai a est lungo il passaggio di assi. La Casa delle Bestie contiene l’ultimo registro.';
+  }
+  if (collected.size >= clueCount) {
+    if (currentZone === 'cellar') return '8 / 8 TRACCE — Avvicinati al piatto nero e premi E per ascoltare Il Bianco.';
+    if (currentZone === 'home') return '8 / 8 TRACCE — La botola in cucina è libera. Scendi in cantina.';
+    return '8 / 8 TRACCE — Torna alla casa principale e scendi dalla botola in cucina.';
+  }
   for (const m of MISSIONS) if (!m.done() && (!m.when || m.when())) return m.text;
   return null;
 }
@@ -2470,11 +2531,12 @@ function updateHorror(dt,t){
   if(!gameStarted||gameEnded||!zone||dialogueOpen||journalOpen)return;
   eventClock+=dt;const p=currentPosition();
   // Fear rises in darkness and falls slowly in lit, occupied rooms.
-  const darkFactor=flashlightOn?0.0:.022;const zoneFactor=currentZone==='cellar'?.014:currentZone==='abattoir'?.018:currentZone==='ruin'?.009:0;
+  const darkFactor=flashlightOn?0.0:.022;
+  const zoneFactor=currentZone==='cellar'?.014:currentZone==='abattoir'?(flashlightOn?.002:.009):currentZone==='ruin'?.009:0;
   fear=Math.min(1,Math.max(.04,fear+(darkFactor+zoneFactor-.002)*dt));
   // Brief, mischievous anomalies: the room seems to answer from the wrong side.
   if(fear>.52&&eventClock>26&&Math.random()<.00075){glitchPulse=Math.max(glitchPulse,.65);audio?.mechanicalEvent('clock');showToast('TREDICI RESPIRI. UNO È FUORI TEMPO.');}
-  if(fear>.995&&currentZone==='abattoir'){triggerDeath('LA STANZA HA OCCUPATO IL TUO CORPO.');return;}
+  if(fear>.995&&currentZone==='abattoir'&&!flashlightOn){triggerDeath('LA STANZA HA OCCUPATO IL TUO CORPO.');return;}
   if(fear>.88&&Math.random()<.0012){glitchPulse=1.15;audio?.stinger(.9);$('event-flash').classList.add('active');setTimeout(()=>$('event-flash').classList.remove('active'),130);}
   if(hiddenBreath){fear=Math.max(.08,fear-.075*dt);}
   $('fear-value').textContent=`${Math.round(fear*100)}%`;
