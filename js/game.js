@@ -1152,6 +1152,43 @@ buildRoad(); buildHome(); buildChurch(); buildRuin(); buildAbattoir(); buildCell
 const abattoirEntrance = zones.road.interactables.find(i => i.destination === 'abattoir');
 if (abattoirEntrance) abattoirEntrance.requiredClues = 7;
 const cellarDoor = zones.home.interactables.find(i => i.destination === 'cellar');
+if (cellarDoor) cellarDoor.requiredClues = clueCount;
+
+// Keep document progress across refreshes. The previous build did not save
+// these eight traces, so ?continue=7 provides a one-time recovery checkpoint
+// for a player who was already stuck at seven.
+const EVIDENCE_SAVE_KEY = 'epistassi-evidence-v1';
+function persistEvidenceProgress() {
+  try { localStorage.setItem(EVIDENCE_SAVE_KEY, JSON.stringify([...collected])); } catch (_) {}
+}
+function restoreEvidenceProgress() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('reset') === '1') {
+    try { localStorage.removeItem(EVIDENCE_SAVE_KEY); } catch (_) {}
+  }
+  let ids = [];
+  if (params.get('continue') === '7') {
+    ids = ['clipping', 'list', 'fork', 'beam', 'mass', 'photo', 'voicemail'];
+  } else {
+    try {
+      const saved = JSON.parse(localStorage.getItem(EVIDENCE_SAVE_KEY) || '[]');
+      if (Array.isArray(saved)) ids = saved.filter(id => typeof id === 'string');
+    } catch (_) {}
+  }
+  const wanted = new Set(ids);
+  for (const z of Object.values(zones)) {
+    for (const item of [...z.interactables]) {
+      if (item.type !== 'clue' || !wanted.has(item.id) || collected.has(item.id)) continue;
+      collected.add(item.id);
+      journal.push({ id: item.id, title: item.title, description: item.description, kind: item.kind || 'documento', zone: z.name });
+      item.object.parent?.remove(item.object);
+      const index = z.interactables.indexOf(item);
+      if (index >= 0) z.interactables.splice(index, 1);
+    }
+  }
+  if (collected.size) persistEvidenceProgress();
+}
+restoreEvidenceProgress();
 
 function enterZone(name, spawn) {
   Object.values(zones).forEach(v => { v.group.visible = false; });
@@ -1350,7 +1387,9 @@ function updateJournalCount(){ $('journal-total').textContent = `${journal.lengt
 function collectClue(item) {
   if (collected.has(item.id)) return;
   collected.add(item.id);
-  journal.push({ id: item.id, title: item.title, description: item.description, kind: item.kind || 'documento', zone: currentZone }); updateJournalCount();
+  journal.push({ id: item.id, title: item.title, description: item.description, kind: item.kind || 'documento', zone: currentZone });
+  persistEvidenceProgress();
+  updateJournalCount();
   zone.group.remove(item.object);
   zone.interactables.splice(zone.interactables.indexOf(item), 1);
   dread = Math.min(1, dread + .13); glitchPulse = Math.max(glitchPulse, .85); audio.stinger(.85);
